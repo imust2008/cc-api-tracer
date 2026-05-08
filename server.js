@@ -3,6 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+// Load .env file (zero-dependency)
+const envPath = path.resolve('.env');
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf('=');
+    if (idx === -1) continue;
+    const key = trimmed.slice(0, idx).trim();
+    const val = trimmed.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
+    if (!process.env[key]) process.env[key] = val;
+  }
+}
+
 const PORT = parseInt(process.env.PORT || '3000');
 const DEEPSEEK_BASE = process.env.DEEPSEEK_BASE || 'https://api.deepseek.com/anthropic';
 const MAX_REQUESTS = parseInt(process.env.MAX_REQUESTS || '500');

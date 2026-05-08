@@ -2,6 +2,10 @@
 
 实时追踪 Claude Code CLI 与 DeepSeek API 之间的请求/响应，提供 Web UI 和本地 Markdown 文件两种查看方式。
 
+## 环境要求
+
+- **Node.js** >= 18（使用内置 `fetch`、`EventSource`、ESM），推荐 v24+
+
 ## 快速开始
 
 ```bash
