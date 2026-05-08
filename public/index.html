@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CC API Tracer</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #1e1e1e;
+  --bg-panel: #252526;
+  --bg-input: #3c3c3c;
+  --border: #3c3c3c;
+  --text: #cccccc;
+  --text-dim: #999;
+  --text-bright: #e0e0e0;
+  --accent: #007acc;
+  --accent-bg: #094771;
+  --green: #4ec9b0;
+  --red: #f44747;
+  --orange: #ce9178;
+  --yellow: #d7ba7d;
+  --pending: #6a6a6a;
+  --row-hover: #2a2d2e;
+  --row-selected: #094771;
+  --font: 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Consolas', 'Courier New', monospace;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 40px;
+}
+.header h1 { font-size: 14px; font-weight: 600; color: var(--text-bright); white-space: nowrap; }
+.header .sep { flex: 1; }
+.header .status-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+}
+.header .status-dot.disconnected { background: var(--red); }
+.header .status-text { font-size: 12px; color: var(--text-dim); }
+.header button {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font);
+}
+.header button:hover { background: #4c4c4c; }
+.header .count { font-size: 12px; color: var(--text-dim); }
+
+.main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.table-wrap {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 150px;
+}
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.table-wrap thead { position: sticky; top: 0; z-index: 2; }
+.table-wrap th {
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.table-wrap td {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid #2d2d2d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.table-wrap tr:hover td { background: var(--row-hover); }
+.table-wrap tr.selected td { background: var(--row-selected) !important; }
+.table-wrap tr.pending td { color: var(--pending); }
+
+.status-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--mono);
+  min-width: 36px;
+  text-align: center;
+}
+.status-2xx { background: #1a3a2a; color: var(--green); }
+.status-3xx { background: #3a3510; color: var(--yellow); }
+.status-4xx, .status-5xx { background: #3a1a1a; color: var(--red); }
+
+.col-id { width: 50px; }
+.col-status { width: 70px; }
+.col-method { width: 60px; }
+.col-path { width: auto; }
+.col-time { width: 90px; }
+.col-duration { width: 80px; }
+.col-size { width: 80px; }
+
+.method-post { color: var(--yellow); }
+.method-get { color: var(--green); }
+
+.resizer {
+  height: 4px;
+  background: var(--border);
+  cursor: ns-resize;
+  flex-shrink: 0;
+}
+.resizer:hover { background: var(--accent); }
+
+.detail {
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 200px;
+}
+.detail.collapsed { display: none; }
+
+.tabs {
+  display: flex;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tab {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  user-select: none;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text-bright); border-bottom-color: var(--accent); }
+
+.tab-content {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  display: none;
+}
+.tab-content.active { display: block; }
+
+.kv-table { width: 100%; border-collapse: collapse; }
+.kv-table td { padding: 2px 8px; vertical-align: top; font-size: 12px; }
+.kv-table .key { color: var(--accent); white-space: nowrap; width: 1%; }
+.kv-table .val { word-break: break-all; }
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  color: var(--text);
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.json-key { color: var(--accent); }
+.json-string { color: var(--orange); }
+.json-number { color: var(--green); }
+.json-bool { color: var(--accent); }
+.json-null { color: var(--text-dim); }
+
+.truncated-warn {
+  color: var(--yellow);
+  padding: 8px;
+  background: #3a3510;
+  border-radius: 3px;
+  margin-bottom: 8px;
+  font-family: var(--font);
+  font-size: 12px;
+}
+
+/* Content-type badge */
+.ct-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: var(--font);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.ct-json { background: #1a3a2a; color: var(--green); }
+.ct-sse  { background: #1a2a3a; color: #569cd6; }
+.ct-text { background: #2d2d2d; color: var(--text-dim); }
+.ct-other { background: #2d2d2d; color: var(--text-dim); }
+
+/* JSON syntax */
+.json-comma { color: var(--text-bright); }
+.json-colon { color: var(--text-bright); }
+.json-bracket { color: var(--text-bright); }
+
+/* SSE formatting */
+.sse-event {
+  color: var(--text-dim);
+  padding: 2px 0;
+  font-size: 11px;
+}
+.sse-label { color: var(--accent); }
+.sse-meta {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.sse-data {
+  background: #1e2a1e;
+  border-left: 2px solid var(--green);
+  padding: 4px 0 4px 12px;
+  margin: 4px 0 12px 0;
+}
+.sse-raw {
+  color: var(--text-dim);
+  border-left: 2px solid #555;
+  padding: 4px 0 4px 12px;
+  margin: 4px 0 12px 0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #424242; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>CC API Tracer</h1>
+  <span class="status-dot" id="statusDot" title="SSE connected"></span>
+  <span class="status-text" id="statusText">已连接</span>
+  <span class="sep"></span>
+  <span class="count" id="reqCount">0 个请求</span>
+  <button onclick="clearRequests()">清除</button>
+</div>
+
+<div class="main">
+  <div class="table-wrap" id="tableWrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="col-id">#</th>
+          <th class="col-status">状态</th>
+          <th class="col-method">方法</th>
+          <th class="col-path">端点</th>
+          <th class="col-time">时间</th>
+          <th class="col-duration">耗时</th>
+          <th class="col-size">大小</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div id="emptyState" class="empty-state">等待 API 请求...</div>
+  </div>
+
+  <div class="resizer" id="resizer"></div>
+
+  <div class="detail collapsed" id="detail">
+    <div class="tabs">
+      <div class="tab active" data-tab="headers" onclick="switchTab('headers')">Headers</div>
+      <div class="tab" data-tab="request" onclick="switchTab('request')">Request</div>
+      <div class="tab" data-tab="response" onclick="switchTab('response')">Response</div>
+    </div>
+    <div class="tab-content active" id="tab-headers"></div>
+    <div class="tab-content" id="tab-request"></div>
+    <div class="tab-content" id="tab-response"></div>
+  </div>
+</div>
+
+<script>
+const MAX_ENTRIES = 500;
+const MAX_BODY = 102400;
+const entries = [];
+const entryMap = new Map();
+let fullData = new Map();
+let selectedId = null;
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+// === SSE ===
+function connectSSE() {
+  const es = new EventSource('/events');
+
+  es.addEventListener('request-start', (e) => {
+    upsertEntry(JSON.parse(e.data));
+  });
+  es.addEventListener('request-end', (e) => {
+    upsertEntry(JSON.parse(e.data));
+  });
+  es.onopen = () => setConnected(true);
+  es.onerror = () => setConnected(false);
+
+  return es;
+}
+
+function setConnected(ok) {
+  const dot = $('#statusDot');
+  const txt = $('#statusText');
+  dot.classList.toggle('disconnected', !ok);
+  txt.textContent = ok ? '已连接' : '连接断开...';
+}
+
+// === Entry management ===
+function upsertEntry(slim) {
+  let entry = entryMap.get(slim.id);
+  if (!entry) {
+    entry = slim;
+    entries.push(entry);
+    entryMap.set(entry.id, entry);
+    while (entries.length > MAX_ENTRIES) {
+      const old = entries.shift();
+      entryMap.delete(old.id);
+      fullData.delete(old.id);
+      if (selectedId === old.id) {
+        selectedId = null;
+        $('#detail').classList.add('collapsed');
+      }
+    }
+  } else {
+    Object.assign(entry, slim);
+  }
+
+  renderTable();
+  if (selectedId === entry.id) renderDetail();
+  updateCount();
+}
+
+// === Load existing on page load ===
+async function loadExisting() {
+  try {
+    const res = await fetch('/api/requests');
+    const data = await res.json();
+    fullData = new Map();
+    for (const full of data) {
+      fullData.set(full.id, full);
+      const slim = {
+        id: full.id, method: full.method, pathname: full.pathname,
+        startTime: full.startTime, status: full.status,
+        duration: full.duration, requestSize: full.requestSize,
+        responseSize: full.responseSize, error: full.error,
+      };
+      const existing = entryMap.get(slim.id);
+      if (existing) {
+        Object.assign(existing, slim);
+      } else {
+        entryMap.set(slim.id, slim);
+        entries.push(slim);
+      }
+    }
+    renderTable();
+    updateCount();
+  } catch (err) {
+    console.error('Failed to load existing requests:', err);
+  }
+}
+
+// === Table rendering ===
+function renderTable() {
+  const tbody = $('#tbody');
+  tbody.innerHTML = '';
+
+  if (entries.length === 0) {
+    $('#emptyState').style.display = 'flex';
+    return;
+  }
+  $('#emptyState').style.display = 'none';
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    const tr = document.createElement('tr');
+    tr.dataset.id = e.id;
+    if (e.id === selectedId) tr.classList.add('selected');
+    if (e.status == null && !e.error) tr.classList.add('pending');
+
+    tr.innerHTML =
+      `<td class="col-id">${e.id}</td>` +
+      `<td class="col-status">${statusCell(e)}</td>` +
+      `<td class="col-method"><span class="method-${e.method.toLowerCase()}">${e.method}</span></td>` +
+      `<td class="col-path" title="${esc(e.pathname)}">${esc(e.pathname)}</td>` +
+      `<td class="col-time">${formatTime(e.startTime)}</td>` +
+      `<td class="col-duration">${formatDuration(e.duration)}</td>` +
+      `<td class="col-size">${formatBytes(e.responseSize ?? e.requestSize)}</td>`;
+
+    tr.addEventListener('click', () => selectEntry(e.id));
+    tbody.appendChild(tr);
+  }
+}
+
+function updateCount() {
+  $('#reqCount').textContent = `${entries.length} 个请求`;
+}
+
+function statusCell(e) {
+  if (e.error) return '<span class="status-badge status-4xx">错误</span>';
+  if (e.status == null) return '<span class="status-badge" style="background:#2d2d2d;color:#6a6a6a">等待</span>';
+  const cls = e.status < 300 ? 'status-2xx' : e.status < 400 ? 'status-3xx' : 'status-4xx';
+  return `<span class="status-badge ${cls}">${e.status}</span>`;
+}
+
+// === Selection and detail ===
+async function selectEntry(id) {
+  selectedId = id;
+  renderTable();
+
+  if (!fullData.has(id)) {
+    try {
+      const res = await fetch('/api/requests');
+      const data = await res.json();
+      fullData = new Map();
+      for (const full of data) fullData.set(full.id, full);
+    } catch {}
+  }
+
+  $('#detail').classList.remove('collapsed');
+  renderDetail();
+}
+
+function renderDetail() {
+  const entry = fullData.get(selectedId) || entryMap.get(selectedId);
+  if (!entry) return;
+
+  const reqBody = getBody(entry.requestBody);
+  const resBody = getBody(entry.responseBody);
+  const isTruncReq = entry.requestBody && entry.requestBody.truncated;
+  const isTruncRes = entry.responseBody && entry.responseBody.truncated;
+  const reqCT = getHeader(entry.requestHeaders, 'content-type');
+  const resCT = getHeader(entry.responseHeaders, 'content-type');
+
+  // Headers
+  let h = '<table class="kv-table">';
+  h += row('General', '', 'section');
+  h += row('Request URL:', entry.method + ' ' + entry.pathname);
+  if (entry.status) h += row('Status:', entry.status + (entry.error ? ' (Proxy Error)' : ''));
+  if (entry.duration != null) h += row('Duration:', formatDuration(entry.duration));
+  if (reqBody) h += row('Request Size:', formatBytes(entry.requestSize));
+  if (resBody) h += row('Response Size:', formatBytes(entry.responseSize));
+
+  if (entry.requestHeaders) {
+    h += row('Request Headers', '', 'section');
+    for (const [k, v] of Object.entries(entry.requestHeaders)) {
+      h += row(k + ':', k === 'authorization' ? maskKey(v) : v);
+    }
+  }
+  if (entry.responseHeaders) {
+    h += row('Response Headers', '', 'section');
+    for (const [k, v] of Object.entries(entry.responseHeaders)) {
+      h += row(k + ':', v);
+    }
+  }
+  h += '</table>';
+  $('#tab-headers').innerHTML = h;
+
+  // Request
+  let rq = '';
+  if (isTruncReq) rq += warnBox(entry.requestBody.fullSize);
+  if (reqBody) {
+    rq += ctBadge(reqCT);
+    rq += `<pre>${formatBody(reqBody, reqCT)}</pre>`;
+  } else {
+    rq += '<div style="color:var(--text-dim)">无请求体</div>';
+  }
+  $('#tab-request').innerHTML = rq;
+
+  // Response
+  let rs = '';
+  if (isTruncRes) rs += warnBox(entry.responseBody.fullSize);
+  if (entry.error) {
+    rs += `<div style="color:var(--red)">代理错误: ${esc(entry.error)}</div>`;
+  } else if (resBody) {
+    rs += ctBadge(resCT);
+    rs += `<pre>${formatBody(resBody, resCT)}</pre>`;
+  } else {
+    rs += '<div style="color:var(--text-dim)">无响应体</div>';
+  }
+  $('#tab-response').innerHTML = rs;
+}
+
+function getHeader(headers, name) {
+  if (!headers) return null;
+  const key = Object.keys(headers).find(k => k.toLowerCase() === name.toLowerCase());
+  return key ? headers[key] : null;
+}
+
+function ctBadge(ct) {
+  if (!ct) return '';
+  let label = ct.split(';')[0];
+  let cls = 'ct-other';
+  if (/json/.test(label)) { cls = 'ct-json'; label = 'JSON'; }
+  else if (/event-stream/.test(label)) { cls = 'ct-sse'; label = 'SSE'; }
+  else if (/text\//.test(label)) { cls = 'ct-text'; }
+  return `<span class="ct-badge ${cls}" title="${esc(ct)}">${esc(label)}</span>`;
+}
+
+function row(key, val, cls) {
+  if (cls === 'section') {
+    return `<tr><td class="key" colspan="2" style="color:var(--text-bright);padding-top:12px">${esc(key)}</td></tr>`;
+  }
+  return `<tr><td class="key">${esc(key)}</td><td class="val">${esc(val)}</td></tr>`;
+}
+
+function getBody(b) {
+  if (!b) return null;
+  return typeof b === 'string' ? b : (b.preview || '');
+}
+
+function warnBox(fullSize) {
+  return `<div class="truncated-warn">Body 已截断（原始大小: ${formatBytes(fullSize)}，仅显示前 ${formatBytes(MAX_BODY)}）</div>`;
+}
+
+function switchTab(name) {
+  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  $$('.tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${name}`));
+}
+
+// === Clear ===
+async function clearRequests() {
+  try {
+    await fetch('/api/clear', { method: 'POST' });
+    entries.length = 0;
+    entryMap.clear();
+    fullData.clear();
+    selectedId = null;
+    $('#detail').classList.add('collapsed');
+    renderTable();
+    updateCount();
+  } catch {}
+}
+
+// === Formatters ===
+function formatTime(iso) {
+  if (!iso) return '-';
+  return new Date(iso).toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function formatDuration(ms) {
+  if (ms == null) return '-';
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(2) + 's';
+}
+
+function formatBytes(b) {
+  if (b == null) return '-';
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  return (b / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function maskKey(val) {
+  if (!val) return '';
+  const m = val.match(/^(Bearer\s+)?(.+)$/i);
+  if (!m) return val;
+  const prefix = m[1] || '';
+  const key = m[2];
+  if (key.length <= 8) return prefix + key;
+  return prefix + key.slice(0, 4) + '****' + key.slice(-4);
+}
+
+function formatBody(body, contentType) {
+  if (!body) return '';
+  const ct = (contentType || '').toLowerCase();
+
+  if (/json/.test(ct)) {
+    return formatJSON(body);
+  }
+  if (/event-stream/.test(ct)) {
+    return formatSSE(body);
+  }
+
+  // Unknown content-type: try JSON first, fall back to plain text
+  return formatJSON(body);
+}
+
+function formatJSON(str) {
+  if (!str) return '';
+  try {
+    const obj = JSON.parse(str);
+    return jsonToHTML(obj, 0);
+  } catch {
+    return esc(str);
+  }
+}
+
+function formatSSE(body) {
+  const lines = body.split('\n');
+  let html = '';
+  let buf = '';
+
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      buf += line.slice(6);
+      continue;
+    }
+    if (line === '' && buf) {
+      // End of event — try to parse accumulated JSON
+      try {
+        const obj = JSON.parse(buf);
+        html += `<div class="sse-data">${jsonToHTML(obj, 0)}</div>`;
+      } catch {
+        html += `<div class="sse-raw">${esc(buf)}</div>`;
+      }
+      buf = '';
+      continue;
+    }
+    if (line.startsWith('event: ')) {
+      html += `<div class="sse-event"><span class="sse-label">event:</span> ${esc(line.slice(7))}</div>`;
+      continue;
+    }
+    // Other SSE lines (like "event:" with no data yet)
+    if (line && !line.startsWith(':')) {
+      html += `<div class="sse-meta">${esc(line)}</div>`;
+    }
+  }
+
+  // Remaining buffer
+  if (buf) {
+    try {
+      const obj = JSON.parse(buf);
+      html += `<div class="sse-data">${jsonToHTML(obj, 0)}</div>`;
+    } catch {
+      html += `<div class="sse-raw">${esc(buf)}</div>`;
+    }
+  }
+
+  return html || esc(body);
+}
+
+function jsonToHTML(obj, depth) {
+  if (obj === null) return '<span class="json-null">null</span>';
+  if (typeof obj === 'boolean') return `<span class="json-bool">${obj}</span>`;
+  if (typeof obj === 'number') return `<span class="json-number">${obj}</span>`;
+  if (typeof obj === 'string') {
+    // If it looks like JSON, try to parse and render inline
+    if (obj.length > 256 && (obj.startsWith('{') || obj.startsWith('['))) {
+      try {
+        const inner = JSON.parse(obj);
+        return `<span class="json-string">"</span>${jsonToHTML(inner, depth + 1)}<span class="json-string">"</span>`;
+      } catch {}
+    }
+    return `<span class="json-string">${esc(JSON.stringify(obj))}</span>`;
+  }
+
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) return '<span class="json-bracket">[]</span>';
+    const indent = '  '.repeat(depth);
+    const childIndent = '  '.repeat(depth + 1);
+    let html = '<span class="json-bracket">[</span>\n';
+    for (let i = 0; i < obj.length; i++) {
+      html += childIndent + jsonToHTML(obj[i], depth + 1);
+      if (i < obj.length - 1) html += '<span class="json-comma">,</span>';
+      html += '\n';
+    }
+    html += indent + '<span class="json-bracket">]</span>';
+    return html;
+  }
+
+  // Object
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return '<span class="json-bracket">{}</span>';
+  const indent = '  '.repeat(depth);
+  const childIndent = '  '.repeat(depth + 1);
+  let html = '<span class="json-bracket">{</span>\n';
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    html += childIndent + `<span class="json-key">${esc(JSON.stringify(k))}</span><span class="json-colon">: </span>`;
+    html += jsonToHTML(obj[k], depth + 1);
+    if (i < keys.length - 1) html += '<span class="json-comma">,</span>';
+    html += '\n';
+  }
+  html += indent + '<span class="json-bracket">}</span>';
+  return html;
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// === Resizer ===
+(function() {
+  const resizer = $('#resizer');
+  const detail = $('#detail');
+  let startY, startHeight;
+
+  resizer.addEventListener('mousedown', (e) => {
+    startY = e.clientY;
+    startHeight = detail.offsetHeight;
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  function onMove(e) {
+    detail.style.height = Math.max(100, startHeight + (startY - e.clientY)) + 'px';
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+})();
+
+// === Init ===
+loadExisting();
+const evtSource = connectSSE();
+</script>
+</body>
+</html>
