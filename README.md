@@ -83,3 +83,7 @@ Claude Code CLI ──→ Proxy (localhost:3000) ──→ DeepSeek API
 | `TRACE_DIR` | `./traces` | Trace 文件输出目录 |
 
 > **注意**：`MAX_BODY_SIZE` 仅限制 Web UI 的展示，Trace 文件始终保存完整的请求/响应体。
+
+## 监控截图
+
+![CC API Tracer 监控界面](20260508132535.png)
